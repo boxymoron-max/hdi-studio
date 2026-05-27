@@ -191,7 +191,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         return json(res, 200, { project });
       }
 
-      // Render preview HTML
+      // Render preview HTML (legacy; v0.3+ uses chat-driven path)
       const prevMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/preview$/);
       if (prevMatch && prevMatch[1] && m === 'POST') {
         const { project, htmlPath } = await ctx.orchestrator.renderPreviewHtml(prevMatch[1]);
@@ -200,6 +200,38 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           preview_url: `/preview/${project.id}`,
           html_path: htmlPath,
         });
+      }
+
+      // Get raw preview HTML (frontend reads to parse data-hv-text nodes)
+      const rawGetMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/raw-html$/);
+      if (rawGetMatch && rawGetMatch[1] && m === 'GET') {
+        const project = await ctx.orchestrator.load(rawGetMatch[1]);
+        if (!project.lastPreviewHtmlPath || !existsSync(project.lastPreviewHtmlPath)) {
+          return json(res, 404, { error: 'No preview HTML yet — pick a template or send a chat first' });
+        }
+        const html = await readFile(project.lastPreviewHtmlPath, 'utf8');
+        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end(html);
+        return;
+      }
+
+      // Write raw preview HTML (frontend posts back the modified HTML
+      // after the user edits a data-hv-text field in the middle column)
+      if (rawGetMatch && rawGetMatch[1] && m === 'PUT') {
+        const project = await ctx.orchestrator.load(rawGetMatch[1]);
+        const ct = req.headers['content-type'] ?? '';
+        let html: string;
+        if (ct.includes('application/json')) {
+          const body = await readBody(req);
+          html = (body.html as string) ?? '';
+        } else {
+          html = await readBodyText(req);
+        }
+        if (!html || !/<\/html>/i.test(html)) {
+          return json(res, 400, { error: 'Body must be a complete HTML document' });
+        }
+        await ctx.orchestrator.writePreviewHtmlRaw(project.id, html);
+        return json(res, 200, { project: await ctx.orchestrator.load(project.id) });
       }
 
       // Export MP4
@@ -440,6 +472,17 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   });
 }
 
+async function readBodyText(req: IncomingMessage): Promise<string> {
+  return new Promise((resolveFn, reject) => {
+    let data = '';
+    req.on('data', (chunk) => {
+      data += chunk;
+    });
+    req.on('end', () => resolveFn(data));
+    req.on('error', reject);
+  });
+}
+
 /**
  * Minimal multipart parser — only extracts the first file field.
  * v0.1 keeps it small; for production switch to formidable / busboy.
@@ -508,53 +551,40 @@ interface BuildPromptArgs {
  */
 function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
   const { tmpl, exampleHtml, priorHtml, history, userText } = args;
-  const recentTurns = history.slice(-6); // last few turns for context
+
+  // Use the prior HTML as the source of truth when iterating; only fall back
+  // to the original example.html on the first turn. This keeps the prompt
+  // bounded in size (~6 KB instead of ~24 KB) so claude --print returns fast.
+  const baseHtml = priorHtml && priorHtml !== exampleHtml ? priorHtml : exampleHtml;
+  const recentUserTurns = history
+    .filter((m) => m.role === 'user')
+    .slice(-3, -1)
+    .map((m) => m.content);
 
   const parts: string[] = [];
-
-  parts.push(`# Role`);
-  parts.push(`You are a Hyperframes video template engineer. The user wants a single self-contained HTML video that opens with animation and is ready to be recorded to MP4.`);
+  parts.push(`Rewrite the HTML below to fulfil the user's request. Keep the visual style — colors, fonts, animations, layout — unchanged unless the user asks otherwise. Replace placeholder text and data with the user's actual content.`);
   parts.push('');
-
-  parts.push(`# Template — visual skeleton (do not change the visual signature)`);
-  parts.push(`Name: ${tmpl.name}`);
-  parts.push(`Category: ${tmpl.category}`);
+  parts.push(`Template: ${tmpl.name} (${tmpl.category})`);
   parts.push(`Description: ${tmpl.description}`);
   parts.push('');
-  parts.push('Reference example HTML (style, animation, layout to preserve):');
+  parts.push(`Mark every user-visible text node with \`data-hv-text="<short-key>"\` so a downstream editor can locate and edit each text. Use stable keys like \`brand_name\`, \`tagline\`, \`headline\`, \`item_1\`, \`cta\`. Existing data-hv-text keys must be preserved.`);
+  parts.push('');
+  parts.push(`Source HTML to rewrite:`);
   parts.push('```html');
-  parts.push(exampleHtml.slice(0, 12000));
+  parts.push(baseHtml.slice(0, 6000));
   parts.push('```');
   parts.push('');
 
-  if (priorHtml) {
-    parts.push(`# Current preview HTML (the user is iterating on this)`);
-    parts.push('```html');
-    parts.push(priorHtml.slice(0, 12000));
-    parts.push('```');
+  if (recentUserTurns.length > 0) {
+    parts.push(`Earlier user requests in this conversation (already applied to the source above):`);
+    for (const t of recentUserTurns) parts.push(`- ${t.slice(0, 200)}`);
     parts.push('');
   }
 
-  if (recentTurns.length > 1) {
-    parts.push(`# Recent conversation`);
-    for (const t of recentTurns.slice(0, -1)) {
-      parts.push(`## ${t.role === 'user' ? 'User' : 'You'}`);
-      parts.push(t.content);
-    }
-    parts.push('');
-  }
-
-  parts.push(`# User request`);
+  parts.push(`Latest user request:`);
   parts.push(userText);
   parts.push('');
-
-  parts.push(`# Output rules (STRICT)`);
-  parts.push(`- Reply with **one** complete HTML document inside a single \`\`\`html\`\`\` code block.`);
-  parts.push(`- Start with \`<!doctype html>\` and end with \`</html>\`.`);
-  parts.push(`- Inline all CSS and JS (no external imports beyond the CDN scripts already in the example).`);
-  parts.push(`- Preserve the template's visual signature (colors, animation timing, layout style) unless the user explicitly asks otherwise.`);
-  parts.push(`- Replace placeholder text/data with the user's actual content.`);
-  parts.push(`- Do **not** include any explanation outside the code block. The user will see the HTML rendered live; they don't need a written summary.`);
+  parts.push(`Reply with EXACTLY one complete HTML document inside a single \`\`\`html\`\`\` fenced code block. Start with \`<!doctype html>\` and end with \`</html>\`. No explanation outside the code block.`);
 
   return parts.join('\n');
 }

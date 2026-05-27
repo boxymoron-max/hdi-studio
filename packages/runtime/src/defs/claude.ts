@@ -10,11 +10,12 @@ export const claude: AgentDef = {
   name: 'Claude Code',
   bin: 'claude',
   versionArgs: ['--version'],
-  buildArgs(_prompt, ctx) {
-    const args: string[] = ['--print', '--permission-mode', 'plan'];
-    if (ctx.cwd) args.push('--add-dir', ctx.cwd);
-    for (const dir of ctx.extraAllowedDirs ?? []) args.push('--add-dir', dir);
-    return args;
+  buildArgs(_prompt, _ctx) {
+    // --print: non-interactive, write entire response to stdout then exit.
+    // No permission-mode: chat-to-HTML never edits files; the model only emits
+    // text + a fenced ```html``` block, which our extractor reads. Plan mode
+    // (which we tried in v0.3) suppressed actual content.
+    return ['--print'];
   },
   streamFormat: 'plain',
   promptViaStdin: true,
