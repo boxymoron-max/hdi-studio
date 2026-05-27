@@ -7,17 +7,9 @@ export { HtmlVideoError } from './errors.js';
 export type { ErrorCode } from './errors.js';
 export { AssetStore } from './asset-store.js';
 export type { AssetStoreOptions } from './asset-store.js';
-export {
-  EngineRegistry,
-  TemplateRegistry,
-  BundleStore,
-  StoryboardStore,
-} from './registry.js';
-export { StoryboardOrchestrator } from './storyboard.js';
+export { EngineRegistry, TemplateRegistry, ProjectStore } from './registry.js';
+export { ProjectOrchestrator } from './project.js';
 export type {
-  GenerateOpts,
-  OrchestratorDeps,
-  SceneSuggestion,
-} from './storyboard.js';
-export { BundleBuilder } from './bundle.js';
-export type { BundleInput } from './bundle.js';
+  CreateProjectInput,
+  ProjectOrchestratorDeps,
+} from './project.js';

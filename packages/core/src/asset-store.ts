@@ -1,7 +1,6 @@
 /**
- * Content-addressed asset store.
- * Files are stored by sha1 of content; deduplication is automatic.
- * RFC-04 §Storyboard 文件存储约定.
+ * Content-addressed asset store, scoped per project.
+ * RFC-05 §文件存储.
  */
 
 import { createHash } from 'node:crypto';
@@ -12,37 +11,33 @@ import type { Asset, AssetType } from './types/index.js';
 import { HtmlVideoError } from './errors.js';
 
 export interface AssetStoreOptions {
-  /** Project root that contains .html-video/ */
   projectRoot: string;
 }
 
 export class AssetStore {
-  private readonly bundlesDir: string;
+  private readonly projectsDir: string;
 
   constructor(opts: AssetStoreOptions) {
-    this.bundlesDir = join(opts.projectRoot, '.html-video', 'bundles');
+    this.projectsDir = join(opts.projectRoot, '.html-video', 'projects');
   }
 
-  private bundleDir(bundleId: string): string {
-    return join(this.bundlesDir, bundleId);
+  private projectDir(projectId: string): string {
+    return join(this.projectsDir, projectId);
   }
 
-  private assetsDir(bundleId: string): string {
-    return join(this.bundleDir(bundleId), 'assets');
+  private assetsDir(projectId: string): string {
+    return join(this.projectDir(projectId), 'assets');
   }
 
-  /** Compute content-addressed id (sha1 of bytes). */
   static async computeId(filePath: string): Promise<string> {
     const buf = await readFile(filePath);
     return createHash('sha1').update(buf).digest('hex');
   }
 
-  /** Compute id for inline content (text/data). */
   static computeInlineId(content: string): string {
     return createHash('sha1').update(content).digest('hex');
   }
 
-  /** Best-effort mime type detection by extension. v0.1 doesn't sniff bytes. */
   static guessMime(filePath: string): { mime: string; type: AssetType } {
     const ext = extname(filePath).toLowerCase();
     const map: Record<string, { mime: string; type: AssetType }> = {
@@ -68,9 +63,8 @@ export class AssetStore {
     return map[ext] ?? { mime: 'application/octet-stream', type: 'reference-link' };
   }
 
-  /** Add a file asset by copying it into the bundle. */
   async addFileAsset(
-    bundleId: string,
+    projectId: string,
     sourcePath: string,
     userTags: string[] = [],
     userCaption?: string,
@@ -81,7 +75,7 @@ export class AssetStore {
     const id = await AssetStore.computeId(sourcePath);
     const { mime, type } = AssetStore.guessMime(sourcePath);
     const ext = extname(sourcePath);
-    const dir = this.assetsDir(bundleId);
+    const dir = this.assetsDir(projectId);
     await mkdir(dir, { recursive: true });
     const destPath = join(dir, `${id}${ext}`);
     if (!existsSync(destPath)) {
@@ -103,16 +97,15 @@ export class AssetStore {
     };
   }
 
-  /** Add an inline text/data asset. */
   async addInlineAsset(
-    bundleId: string,
+    projectId: string,
     content: string,
     type: 'text' | 'data',
     userTags: string[] = [],
     userCaption?: string,
   ): Promise<Asset> {
     const id = AssetStore.computeInlineId(content);
-    const dir = this.assetsDir(bundleId);
+    const dir = this.assetsDir(projectId);
     await mkdir(dir, { recursive: true });
     const ext = type === 'data' ? '.json' : '.txt';
     const destPath = join(dir, `${id}${ext}`);
@@ -134,8 +127,7 @@ export class AssetStore {
     };
   }
 
-  /** Resolve absolute path of an asset within a bundle. */
-  resolvePath(bundleId: string, asset: Asset): string {
+  resolvePath(asset: Asset): string {
     if (asset.path) return asset.path;
     throw new HtmlVideoError('asset-not-found', `Asset ${asset.id} has no path`);
   }

@@ -7,10 +7,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AssetStore,
-  BundleStore,
   EngineRegistry,
-  StoryboardOrchestrator,
-  StoryboardStore,
+  ProjectOrchestrator,
+  ProjectStore,
   TemplateRegistry,
 } from '@html-video/core';
 import hfAdapter from '@html-video/adapter-hyperframes';
@@ -19,13 +18,12 @@ export interface CliContext {
   projectRoot: string;
   engines: EngineRegistry;
   templates: TemplateRegistry;
-  bundles: BundleStore;
-  storyboards: StoryboardStore;
+  projects: ProjectStore;
   assets: AssetStore;
-  orchestrator: StoryboardOrchestrator;
+  orchestrator: ProjectOrchestrator;
+  templatesDir: string;
 }
 
-/** Find project root by walking up looking for package.json or .html-video/. */
 export function findProjectRoot(start: string = process.cwd()): string {
   let dir = start;
   for (let i = 0; i < 8; i++) {
@@ -39,11 +37,9 @@ export function findProjectRoot(start: string = process.cwd()): string {
   return start;
 }
 
-/** Find the templates/ directory: prefer projectRoot/templates, fallback to monorepo root. */
 function findTemplatesDir(projectRoot: string): string {
   const candidates = [
     join(projectRoot, 'templates'),
-    // When CLI is installed in a user's project, templates ship inside our package
     // packages/cli/dist/context.js → up 3 levels → monorepo root → templates/
     join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'templates'),
   ];
@@ -60,18 +56,19 @@ export async function bootstrap(opts: { cwd?: string } = {}): Promise<CliContext
   engines.register(hfAdapter);
 
   const templates = new TemplateRegistry();
-  await templates.scan(findTemplatesDir(projectRoot));
+  const templatesDir = findTemplatesDir(projectRoot);
+  await templates.scan(templatesDir);
 
-  const bundles = new BundleStore(projectRoot);
-  const storyboards = new StoryboardStore(projectRoot);
+  const projects = new ProjectStore(projectRoot);
   const assets = new AssetStore({ projectRoot });
 
-  const orchestrator = new StoryboardOrchestrator({
+  const orchestrator = new ProjectOrchestrator({
     projectRoot,
     engines,
     templates,
-    storyboards,
+    projects,
+    assets,
   });
 
-  return { projectRoot, engines, templates, bundles, storyboards, assets, orchestrator };
+  return { projectRoot, engines, templates, projects, assets, orchestrator, templatesDir };
 }

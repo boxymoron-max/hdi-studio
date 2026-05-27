@@ -1,5 +1,5 @@
 /**
- * Stable error codes per RFC-01 §render() error codes.
+ * Stable error codes per RFC-01 + RFC-05.
  */
 
 export type ErrorCode =
@@ -13,8 +13,7 @@ export type ErrorCode =
   | 'disk-full'
   | 'cancelled'
   | 'asset-not-found'
-  | 'storyboard-not-found'
-  | 'storyboard-not-approved'
+  | 'project-not-found'
   | 'invalid-input';
 
 export class HtmlVideoError extends Error {

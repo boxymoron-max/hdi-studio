@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 import cacModule from 'cac';
 import { bootstrap } from './context.js';
-import { setJsonMode, fail } from './output.js';
+import { setJsonMode, ok, fail } from './output.js';
 import { runDoctor } from './commands/doctor.js';
 import { listEngines } from './commands/list-engines.js';
 import { searchTemplates, inspectTemplate } from './commands/templates.js';
-import { uploadAssets } from './commands/assets.js';
 import {
-  generateStoryboard,
-  editStoryboard,
-  previewStoryboard,
-  renderStoryboard,
-} from './commands/storyboard.js';
+  projectCreate,
+  projectList,
+  projectShow,
+  projectDelete,
+  projectAddAsset,
+  projectRemoveAsset,
+  projectSetTemplate,
+  projectSetVar,
+  projectSetVars,
+  projectPreview,
+  projectRender,
+} from './commands/project.js';
+import { startStudioServer } from './studio-server.js';
 
 // cac is a CJS default export; ESM interop sometimes wraps it in `.default`
 // biome-ignore lint/suspicious/noExplicitAny: cac's types don't expose this shape
@@ -52,107 +59,157 @@ cli
     });
   });
 
-cli.command('inspect-template <id>', 'Show full metadata for a template').action(
-  async (id: string, opts: any) => {
+cli
+  .command('inspect-template <id>', 'Show full metadata for a template')
+  .action(async (id: string, opts: any) => {
     setJsonMode(!!opts.json);
     const ctx = await bootstrap({ cwd: opts.cwd });
     await inspectTemplate(ctx, id);
-  },
-);
+  });
+
+// ====== project-* commands (RFC-05) ======
 
 cli
-  .command('assets upload', 'Create asset bundle from intent + files/text/data')
-  .option('--intent <text>', 'One-sentence user intent (required)')
-  .option('--aspect <ratio>', 'Aspect ratio')
-  .option('--duration-target-sec <n>', 'Target total duration in seconds')
-  .option('--format <fmt>', 'mp4 or webm')
-  .option('--fps <n>', 'fps')
-  .option('--mood <text>', 'Free-text mood')
-  .option('--language <code>', 'zh-CN or en-US etc')
-  .option('--commercial', 'Filter to commercial-use templates')
-  .option('--files <paths>', 'Comma-separated file paths', { type: [String] })
-  .option('--inline-text <text>', 'Inline text asset (repeatable)', { type: [String] })
-  .option('--inline-data-file <path>', 'JSON/CSV file to embed (repeatable)', { type: [String] })
+  .command('project-create', 'Create a new project')
+  .option('--name <text>', 'Project name (required)')
+  .option('--intent <text>', 'One-sentence description')
+  .option('--aspect <ratio>', '16:9 / 9:16 / 1:1')
+  .option('--commercial', 'Mark as commercial-use')
   .action(async (opts: any) => {
     setJsonMode(!!opts.json);
     const ctx = await bootstrap({ cwd: opts.cwd });
-    await uploadAssets(ctx, {
+    await projectCreate(ctx, {
+      name: opts.name,
       intent: opts.intent,
       aspect: opts.aspect,
-      durationTargetSec: opts.durationTargetSec ? Number(opts.durationTargetSec) : undefined,
-      format: opts.format,
-      fps: opts.fps ? Number(opts.fps) : undefined,
-      mood: opts.mood,
-      language: opts.language,
       commercial: !!opts.commercial,
-      files: flattenList(opts.files),
-      inlineText: flattenList(opts.inlineText),
-      inlineDataFile: flattenList(opts.inlineDataFile),
+    });
+  });
+
+cli.command('project-list', 'List all projects').action(async (opts: any) => {
+  setJsonMode(!!opts.json);
+  const ctx = await bootstrap({ cwd: opts.cwd });
+  await projectList(ctx);
+});
+
+cli
+  .command('project-show <id>', 'Show project details')
+  .action(async (id: string, opts: any) => {
+    setJsonMode(!!opts.json);
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await projectShow(ctx, id);
+  });
+
+cli
+  .command('project-delete <id>', 'Delete a project')
+  .action(async (id: string, opts: any) => {
+    setJsonMode(!!opts.json);
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await projectDelete(ctx, id);
+  });
+
+cli
+  .command('project-add-asset <id>', 'Add an asset to a project')
+  .option('--file <path>', 'Path to a file (image / video / audio / data)')
+  .option('--inline-text <text>', 'Inline text content')
+  .option('--inline-data-file <path>', 'Path to JSON / CSV file to embed as data asset')
+  .option('--caption <text>', 'Optional caption')
+  .action(async (id: string, opts: any) => {
+    setJsonMode(!!opts.json);
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await projectAddAsset(ctx, id, {
+      file: opts.file,
+      inlineText: opts.inlineText,
+      inlineDataFile: opts.inlineDataFile,
+      caption: opts.caption,
     });
   });
 
 cli
-  .command('storyboard generate <bundleId>', 'Generate storyboard from a bundle')
-  .action(async (bundleId: string, opts: any) => {
+  .command('project-remove-asset <id>', 'Remove an asset from a project')
+  .option('--asset <assetId>', 'Asset id to remove (required)')
+  .action(async (id: string, opts: any) => {
     setJsonMode(!!opts.json);
+    if (!opts.asset) fail('invalid-input', '--asset required');
     const ctx = await bootstrap({ cwd: opts.cwd });
-    await generateStoryboard(ctx, bundleId);
+    await projectRemoveAsset(ctx, id, opts.asset);
   });
 
 cli
-  .command('storyboard edit <storyboardId>', 'Edit storyboard')
-  .option('--op <op>', 'remove-scene | set-duration | reorder | approve')
-  .option('--scene-id <id>', 'Scene id (for remove-scene / set-duration)')
-  .option('--duration-sec <n>', 'New duration in seconds')
-  .option('--scenes <ids>', 'Comma-separated ids for reorder')
-  .action(async (storyboardId: string, opts: any) => {
+  .command('project-set-template <id>', 'Pick a template for the project')
+  .option('--template <templateId>', 'Template id (required)')
+  .action(async (id: string, opts: any) => {
+    setJsonMode(!!opts.json);
+    if (!opts.template) fail('invalid-input', '--template required');
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await projectSetTemplate(ctx, id, opts.template);
+  });
+
+cli
+  .command('project-set-var <id>', 'Set a single variable')
+  .option('--key <name>', 'Variable name')
+  .option('--value <json>', 'Value (parsed as JSON if possible, else string)')
+  .action(async (id: string, opts: any) => {
+    setJsonMode(!!opts.json);
+    if (!opts.key) fail('invalid-input', '--key required');
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await projectSetVar(ctx, id, opts.key, opts.value);
+  });
+
+cli
+  .command('project-set-vars <id>', 'Replace all variables from a JSON file')
+  .option('--vars-file <path>', 'Path to JSON file (required)')
+  .action(async (id: string, opts: any) => {
+    setJsonMode(!!opts.json);
+    if (!opts.varsFile) fail('invalid-input', '--vars-file required');
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await projectSetVars(ctx, id, opts.varsFile);
+  });
+
+cli
+  .command('project-preview <id>', 'Render an HTML preview of the project')
+  .action(async (id: string, opts: any) => {
     setJsonMode(!!opts.json);
     const ctx = await bootstrap({ cwd: opts.cwd });
-    if (!opts.op) fail('invalid-input', '--op required');
-    await editStoryboard(ctx, storyboardId, {
-      op: opts.op,
-      sceneId: opts.sceneId,
-      durationSec: opts.durationSec ? Number(opts.durationSec) : undefined,
-      scenes: opts.scenes,
+    await projectPreview(ctx, id);
+  });
+
+cli
+  .command('project-render <id>', 'Export the project to MP4')
+  .option('--output <path>', 'Output MP4 path')
+  .option('--stream-progress', 'Emit progress as NDJSON')
+  .action(async (id: string, opts: any) => {
+    setJsonMode(!!opts.json);
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await projectRender(ctx, id, {
+      output: opts.output,
+      streamProgress: !!opts.streamProgress,
     });
   });
 
-cli
-  .command('storyboard preview <storyboardId>', 'Start preview server')
-  .option('--port <n>', 'Port (0=auto)', { default: 3071 })
-  .action(async (storyboardId: string, opts: any) => {
-    setJsonMode(!!opts.json);
-    const ctx = await bootstrap({ cwd: opts.cwd });
-    await previewStoryboard(ctx, storyboardId, Number(opts.port));
-  });
+// ====== Studio (HTML Anything-style three-pane UI) ======
 
 cli
-  .command('storyboard render <storyboardId>', 'Render storyboard to MP4')
-  .option('--output <path>', 'Output MP4 path', { default: 'output.mp4' })
-  .option('--stream-progress', 'Emit progress events as NDJSON')
-  .action(async (storyboardId: string, opts: any) => {
+  .command('studio', 'Launch the project studio in the browser')
+  .option('--port <n>', 'Port (default 3071)', { default: 3071 })
+  .action(async (opts: any) => {
     setJsonMode(!!opts.json);
     const ctx = await bootstrap({ cwd: opts.cwd });
-    await renderStoryboard(ctx, storyboardId, opts.output, !!opts.streamProgress);
+    const handle = await startStudioServer(ctx, Number(opts.port));
+    ok({
+      url: handle.url,
+      port: handle.port,
+      pid: process.pid,
+      project_count: (await ctx.orchestrator.list()).length,
+      template_count: ctx.templates.list().length,
+      note: 'Studio running. Press Ctrl+C to stop.',
+    });
+    process.on('SIGINT', () => {
+      handle.close();
+      process.exit(0);
+    });
   });
 
 cli.help();
 cli.version('0.1.0');
 cli.parse();
-
-function flattenList(input: unknown): string[] | undefined {
-  if (input == null) return undefined;
-  if (Array.isArray(input)) {
-    const out: string[] = [];
-    for (const item of input) {
-      if (typeof item === 'string') {
-        out.push(...item.split(',').map((s) => s.trim()).filter(Boolean));
-      }
-    }
-    return out;
-  }
-  if (typeof input === 'string') {
-    return input.split(',').map((s) => s.trim()).filter(Boolean);
-  }
-  return undefined;
-}

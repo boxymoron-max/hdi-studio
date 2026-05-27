@@ -1,23 +1,22 @@
 /**
- * Registries for engine adapters, templates, asset bundles, and storyboards.
- * v0.1: in-memory + JSON-on-disk persistence (sqlite slot reserved for v0.2).
+ * Registries for engine adapters, templates, and projects.
+ * RFC-05: Storyboard removed; Project takes its place.
  */
 
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type {
-  AssetBundle,
   EngineAdapter,
   EngineId,
-  Storyboard,
+  Project,
   TemplateMetadata,
 } from './types/index.js';
 import { HtmlVideoError } from './errors.js';
 
 // ---------------------------------------------------------------------------
-// EngineRegistry — adapter discovery & retrieval
+// EngineRegistry
 // ---------------------------------------------------------------------------
 
 export class EngineRegistry {
@@ -48,13 +47,12 @@ export class EngineRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// TemplateRegistry — fs-based scan of templates/ directory
+// TemplateRegistry
 // ---------------------------------------------------------------------------
 
 export class TemplateRegistry {
   private templates = new Map<string, TemplateMetadata>();
 
-  /** Scan a directory containing one subdirectory per template. */
   async scan(rootDir: string): Promise<TemplateMetadata[]> {
     if (!existsSync(rootDir)) return [];
     const entries = await readdir(rootDir, { withFileTypes: true });
@@ -89,11 +87,6 @@ export class TemplateRegistry {
     return [...this.templates.values()];
   }
 
-  /**
-   * Simple intent-based search.
-   * v0.1: lowercase keyword match against tags + best_for + name + description.
-   * v0.2: replace with embedding-based retrieval.
-   */
   search(opts: {
     intent?: string;
     aspect?: string;
@@ -111,7 +104,6 @@ export class TemplateRegistry {
       const reasonParts: string[] = [];
       let score = 0;
 
-      // Tag/best_for/name/description tokens
       const haystack = [
         ...t.tags,
         ...t.best_for,
@@ -128,29 +120,24 @@ export class TemplateRegistry {
         reasonParts.push(`matched ${matched.length} intent tokens`);
       }
 
-      // Aspect support
       if (opts.aspect) {
         if (t.output.resolution.supported_aspects.includes(opts.aspect)) {
           score += 0.15;
           reasonParts.push(`aspect ${opts.aspect} supported`);
         } else {
-          // soft penalty, don't filter out — let agent decide
           score -= 0.1;
         }
       }
 
-      // License filter (hard)
       if (opts.licenseAllow && !opts.licenseAllow.includes(t.license.spdx)) {
         continue;
       }
       reasonParts.push(`license ${t.license.spdx} ok`);
 
-      // Engine availability
       if (opts.enginesAvailable && !opts.enginesAvailable.includes(t.engine)) {
         continue;
       }
 
-      // Cap score
       score = Math.max(0, Math.min(1, score));
 
       ranked.push({
@@ -166,65 +153,65 @@ export class TemplateRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// BundleStore / StoryboardStore — JSON-on-disk persistence
+// ProjectStore — JSON-on-disk persistence
 // ---------------------------------------------------------------------------
 
-abstract class JsonStore<T extends { id: string }> {
-  constructor(
-    protected projectRoot: string,
-    protected subdir: string,
-  ) {}
+export class ProjectStore {
+  constructor(private projectRoot: string) {}
 
-  protected dir(): string {
-    return join(this.projectRoot, '.html-video', this.subdir);
+  private dir(): string {
+    return join(this.projectRoot, '.html-video', 'projects');
   }
 
-  protected path(id: string): string {
-    return join(this.dir(), id, `${this.subdir.replace(/s$/, '')}.json`);
+  private projectDir(id: string): string {
+    return join(this.dir(), id);
   }
 
-  async save(item: T): Promise<void> {
-    const dir = join(this.dir(), item.id);
-    await mkdir(dir, { recursive: true });
-    await writeFile(this.path(item.id), JSON.stringify(item, null, 2), 'utf8');
+  private path(id: string): string {
+    return join(this.projectDir(id), 'project.json');
   }
 
-  async load(id: string): Promise<T> {
+  /** Ensure project directory exists; returns its absolute path. */
+  async ensureDir(id: string): Promise<string> {
+    const dir = this.projectDir(id);
+    await mkdir(join(dir, 'assets'), { recursive: true });
+    return dir;
+  }
+
+  async save(project: Project): Promise<void> {
+    await this.ensureDir(project.id);
+    project.updatedAt = new Date().toISOString();
+    await writeFile(this.path(project.id), JSON.stringify(project, null, 2), 'utf8');
+  }
+
+  async load(id: string): Promise<Project> {
     const p = this.path(id);
     if (!existsSync(p)) {
-      throw new HtmlVideoError(
-        this.subdir === 'bundles' ? 'asset-not-found' : 'storyboard-not-found',
-        `${this.subdir.replace(/s$/, '')} ${id} not found`,
-      );
+      throw new HtmlVideoError('project-not-found', `Project ${id} not found`);
     }
-    const raw = await readFile(p, 'utf8');
-    return JSON.parse(raw) as T;
+    return JSON.parse(await readFile(p, 'utf8')) as Project;
   }
 
-  async list(): Promise<T[]> {
+  async list(): Promise<Project[]> {
     const d = this.dir();
     if (!existsSync(d)) return [];
     const ids = await readdir(d);
-    const items: T[] = [];
+    const out: Project[] = [];
     for (const id of ids) {
       try {
-        items.push(await this.load(id));
+        out.push(await this.load(id));
       } catch {
-        // skip corrupt entries
+        // skip corrupt
       }
     }
-    return items;
+    out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return out;
   }
-}
 
-export class BundleStore extends JsonStore<AssetBundle> {
-  constructor(projectRoot: string) {
-    super(projectRoot, 'bundles');
-  }
-}
-
-export class StoryboardStore extends JsonStore<Storyboard> {
-  constructor(projectRoot: string) {
-    super(projectRoot, 'storyboards');
+  async remove(id: string): Promise<void> {
+    const dir = this.projectDir(id);
+    if (existsSync(dir)) {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 }

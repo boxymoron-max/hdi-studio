@@ -1,7 +1,10 @@
 /**
  * @html-video/core type definitions
- * Implements RFC-01 (engine adapter) + RFC-02 (template metadata) + RFC-04 (storyboard).
- * See research/2026-05-26-spec-{01,02,04}-*.md.
+ * Implements RFC-01 (engine adapter) + RFC-02 (template metadata) + RFC-05 (project-centric workflow).
+ * See research/2026-05-{26,27}-spec-{01,02,05}-*.md.
+ *
+ * NOTE: Storyboard / Scene types from RFC-04 were removed in v0.1
+ * after Joey's product clarification — see RFC-05.
  */
 
 // ============================================================================
@@ -229,7 +232,7 @@ export interface TemplateRef {
 }
 
 // ============================================================================
-// RFC-04: Storyboard-first Workflow
+// RFC-05: Project-centric workflow
 // ============================================================================
 
 export type AssetType = 'image' | 'text' | 'data' | 'audio' | 'video' | 'reference-link';
@@ -264,48 +267,20 @@ export interface UserPreferences {
   commercial?: boolean;
 }
 
-export interface AssetBundle {
+export type ProjectStatus = 'draft' | 'previewed' | 'rendered';
+
+export interface Project {
   id: string;
-  intent: string;
-  preferences: UserPreferences;
+  name: string;
+  intent?: string;
   assets: Asset[];
-  createdAt: string;
-}
-
-export type TransitionId = 'cut' | 'fade' | 'slide-left' | 'slide-right' | 'zoom' | string;
-
-export interface AudioTrack {
-  assetId: string;
-  startSec: number;
-  fadeInSec?: number;
-  fadeOutSec?: number;
-  volumeDb?: number;
-}
-
-export interface Scene {
-  id: string;
-  template: { id: string; engine: EngineId };
+  templateId: string | null;
   variables: Record<string, unknown>;
-  assetRefs: string[];
-  startSec: number;
-  durationSec: number;
-  transitionToNext?: TransitionId;
-  agentNote: string;
-  previewHtmlPath: string;
-  previewPosterPath?: string;
-}
-
-export type StoryboardStatus = 'draft' | 'ready-for-review' | 'approved' | 'rendered';
-
-export interface Storyboard {
-  id: string;
-  bundleId: string;
-  intent: string;
-  scenes: Scene[];
-  globalAudio?: AudioTrack[];
-  defaultTransition?: TransitionId;
-  estimatedDurationSec: number;
-  status: StoryboardStatus;
+  preferences: UserPreferences;
+  status: ProjectStatus;
+  lastPreviewHtmlPath?: string;
+  lastPreviewPosterPath?: string;
+  lastOutputMp4Path?: string;
   createdAt: string;
   updatedAt: string;
 }

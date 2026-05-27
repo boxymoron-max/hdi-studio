@@ -1,0 +1,17 @@
+{
+  "id": "proj_06e57c70-41e",
+  "name": "11",
+  "assets": [],
+  "templateId": "image-pan-ken-burns",
+  "variables": {
+    "duration_sec": 10,
+    "pan_direction": "zoom-in",
+    "caption": ""
+  },
+  "preferences": {},
+  "status": "previewed",
+  "createdAt": "2026-05-27T03:14:00.983Z",
+  "updatedAt": "2026-05-27T03:14:57.395Z",
+  "lastPreviewHtmlPath": "/Users/joey/Desktop/claude-code/projects/html-video/.html-video/projects/proj_06e57c70-41e/preview.html",
+  "lastPreviewPosterPath": "/Users/joey/Desktop/claude-code/projects/html-video/.html-video/projects/proj_06e57c70-41e/poster.svg"
+}
