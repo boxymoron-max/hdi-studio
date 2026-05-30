@@ -61,6 +61,13 @@
     box-shadow: inset 0 -1px 0 rgba(0,0,0,.08), 0 4px 10px rgba(201, 100, 66, .18); }
   .toolbar .export-btn:hover:not(:disabled) { background: var(--accent-hover); }
   .toolbar .export-btn:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
+  .toolbar .lang-switch select { background: var(--bg-panel);
+    border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: var(--radius-sm); padding: 4px 8px; font-size: 11.5px;
+    font-family: var(--font-mono); cursor: pointer;
+    transition: border-color .15s, color .15s; }
+  .toolbar .lang-switch select:hover { border-color: var(--accent); color: var(--text); }
+  .toolbar .lang-switch select:focus { outline: none; border-color: var(--accent); }
 
   /* ===== Body: 4 columns ===== */
   /* sidebar / CHAT / PREVIEW (centre, biggest) / text-fields (right, collapsible) */
@@ -646,25 +653,33 @@
         <div class="v">studio · v0.7</div>
       </div>
     </div>
-    <input class="name-input" id="proj-name" placeholder="(no project)" disabled />
+    <input class="name-input" id="proj-name" data-i18n-attr="placeholder:app.no_project" disabled />
 
     <div class="toolbar-section">
-      <span class="sec-label">Template</span>
+      <span class="sec-label" data-i18n="toolbar.template">Template</span>
       <button class="pick-btn empty" id="btn-pick-template" disabled>
         <span class="label">— choose —</span><span class="arrow">▾</span>
       </button>
     </div>
 
     <div class="toolbar-section">
-      <span class="sec-label">Agent</span>
+      <span class="sec-label" data-i18n="toolbar.agent">Agent</span>
       <select id="agent-select" disabled>
-        <option value="">— none —</option>
+        <option value="" data-i18n="toolbar.agent_none">— none —</option>
       </select>
       <span class="agent-status missing" id="agent-status">○</span>
     </div>
 
     <div class="grow"></div>
-    <button class="export-btn" id="btn-export" disabled>Export MP4</button>
+
+    <div class="toolbar-section lang-switch">
+      <select id="lang-select" title="Language" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="zh">中文</option>
+      </select>
+    </div>
+
+    <button class="export-btn" id="btn-export" disabled data-i18n="toolbar.export_mp4">Export MP4</button>
   </header>
 
   <div class="body" id="body">
@@ -690,12 +705,12 @@
 
 <div class="modal-bg small-modal" id="new-modal">
   <div class="modal">
-    <h2>New project</h2>
-    <input id="new-name" placeholder="Project name" autofocus />
-    <input id="new-intent" placeholder="(optional) one-sentence description" />
+    <h2 data-i18n="modal.new.title">New project</h2>
+    <input id="new-name" data-i18n-attr="placeholder:modal.new.name_placeholder" autofocus />
+    <input id="new-intent" data-i18n-attr="placeholder:modal.new.intent_placeholder" />
     <div class="actions">
-      <button id="new-cancel">Cancel</button>
-      <button class="primary" id="new-ok">Create</button>
+      <button id="new-cancel" data-i18n="modal.new.cancel">Cancel</button>
+      <button class="primary" id="new-ok" data-i18n="modal.new.create">Create</button>
     </div>
   </div>
 </div>
@@ -703,8 +718,8 @@
 <div class="modal-bg" id="gallery-modal">
   <div class="modal">
     <div class="modal-head">
-      <h2>Pick a template</h2>
-      <button class="modal-close" id="gallery-close">Close</button>
+      <h2 data-i18n="gallery.title">Pick a template</h2>
+      <button class="modal-close" id="gallery-close" data-i18n="gallery.close">Close</button>
     </div>
     <div class="gallery" id="gallery"></div>
   </div>

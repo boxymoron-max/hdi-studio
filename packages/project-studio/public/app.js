@@ -1,5 +1,16 @@
 // html-video studio v0.4 — chat-driven HTML + template gallery + text-node editor
 
+import { t, getLocale, setLocale, AVAILABLE_LOCALES } from './i18n.js';
+
+// Re-render whole UI on language change.
+document.addEventListener('hv-locale-change', () => {
+  document.documentElement.lang = getLocale();
+  if (typeof renderToolbar === 'function') renderToolbar();
+  if (typeof renderMain === 'function') renderMain();
+  if (typeof renderSidebar === 'function') renderSidebar();
+});
+document.documentElement.lang = getLocale();
+
 const API = {
   projects: () => fetch('/api/projects').then(r => r.json()),
   createProject: b => fetch('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json()),
@@ -90,7 +101,7 @@ function formatPct(value) {
 async function createDefaultProject() {
   const r = await API.createProject({ name: defaultProjectName(0) });
   if (!r?.project) {
-    toast('Failed to create project', 'error');
+    toast(t('modal.new.failed'), 'error');
     return;
   }
   await refreshProjects();
@@ -104,7 +115,7 @@ async function startExportStream() {
   state.exporting = true;
   state.exportProgress = { pct: 0, stage: 'starting' };
   renderToolbar();
-  state.messages.push({ role: 'preview-event', content: '⏵ 开始导出 MP4…', ts: Date.now() });
+  state.messages.push({ role: 'preview-event', content: t('export.starting'), ts: Date.now() });
   renderChatLog();
 
   let res;
@@ -117,7 +128,7 @@ async function startExportStream() {
   } catch (e) {
     state.exporting = false;
     state.exportProgress = null;
-    toast('Export 失败：' + (e?.message ?? e), 'error');
+    toast(t('export.failed_short', { message: (e?.message ?? e) }), 'error');
     renderToolbar();
     return;
   }
@@ -125,7 +136,7 @@ async function startExportStream() {
     state.exporting = false;
     state.exportProgress = null;
     const err = await res.text().catch(() => '');
-    toast('Export 失败：' + err.slice(0, 200), 'error');
+    toast(t('export.failed_short', { message: err.slice(0, 200) }), 'error');
     renderToolbar();
     return;
   }
@@ -154,7 +165,7 @@ async function startExportStream() {
           const seconds = ev.elapsed_ms ? `${(ev.elapsed_ms / 1000).toFixed(1)}s` : '';
           state.messages.push({
             role: 'preview-event',
-            content: `✓ MP4 已导出${seconds ? ' · ' + seconds : ''}`,
+            content: seconds ? t('export.done_seconds', { seconds }) : t('export.done_no_seconds'),
             ts: Date.now(),
           });
           state.messages.push({
@@ -170,7 +181,7 @@ async function startExportStream() {
           state.exportProgress = null;
           state.messages.push({
             role: 'system',
-            content: `⚠️ 导出失败：${ev.message}`,
+            content: t('export.failed', { message: ev.message }),
             ts: Date.now(),
           });
           renderChatLog();
@@ -181,7 +192,7 @@ async function startExportStream() {
   } catch (e) {
     state.exporting = false;
     state.exportProgress = null;
-    toast('Export 流中断：' + (e?.message ?? e), 'error');
+    toast(t('export.stream_interrupted', { message: (e?.message ?? e) }), 'error');
     renderToolbar();
   }
 }
@@ -206,7 +217,7 @@ async function revealExportedFile() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `${r.status}`);
   } catch (e) {
-    toast('打开失败：' + (e?.message ?? e), 'error');
+    toast(t('export.reveal_failed', { message: (e?.message ?? e) }), 'error');
   }
 }
 async function refreshTemplates() {
@@ -241,7 +252,7 @@ async function selectProject(id) {
 function renderSidebar() {
   const list = document.getElementById('project-list');
   if (!state.projects.length) {
-    list.innerHTML = '<div class="empty-list">no projects yet</div>';
+    list.innerHTML = `<div class="empty-list">${t('sidebar.empty_list')}</div>`;
     return;
   }
   list.innerHTML = '';
@@ -277,8 +288,8 @@ function openProjectMenu(anchor) {
   const menu = document.createElement('div');
   menu.className = 'row-menu';
   menu.innerHTML = `
-    <button data-act="rename">✎ 重命名</button>
-    <button data-act="delete">🗑 删除</button>
+    <button data-act="rename">${t('sidebar.menu.rename')}</button>
+    <button data-act="delete">${t('sidebar.menu.delete')}</button>
   `;
   // Position below the button.
   const r = anchor.getBoundingClientRect();
@@ -287,7 +298,7 @@ function openProjectMenu(anchor) {
   document.body.appendChild(menu);
   menu.querySelector('[data-act="rename"]').onclick = async () => {
     menu.remove();
-    const next = prompt('新项目名', proj.name);
+    const next = prompt(t('sidebar.rename_prompt'), proj.name);
     if (next == null) return;
     const trimmed = next.trim();
     if (!trimmed || trimmed === proj.name) return;
@@ -301,7 +312,7 @@ function openProjectMenu(anchor) {
   };
   menu.querySelector('[data-act="delete"]').onclick = async () => {
     menu.remove();
-    if (!confirm(`删除 "${proj.name}"？此操作不可撤销。`)) return;
+    if (!confirm(t('sidebar.delete_confirm', { name: proj.name }))) return;
     await API.deleteProject(proj.id);
     await refreshProjects();
     if (state.selectedId === proj.id) {
@@ -359,7 +370,7 @@ function renderToolbar() {
   } else {
     pickBtn.classList.add('empty');
     // Template is optional — label hints at quick-start, not required step
-    pickBtn.querySelector('.label').textContent = 'Optional · Pick template';
+    pickBtn.querySelector('.label').textContent = t('toolbar.template_pick');
   }
 
   const availableAgents = state.agents.filter(a => a.available);
@@ -374,10 +385,10 @@ function renderToolbar() {
 
   if (availableAgents.length > 0) {
     agentStatus.className = 'agent-status connected';
-    agentStatus.textContent = '● ready';
+    agentStatus.textContent = t('toolbar.agent_ready');
   } else {
     agentStatus.className = 'agent-status missing';
-    agentStatus.textContent = '○ install';
+    agentStatus.textContent = t('toolbar.agent_install');
   }
 
   // Frames-mode projects don't need a template to export — they have
@@ -387,10 +398,13 @@ function renderToolbar() {
   exportBtn.disabled = !p || (!p.templateId && !hasFrames) || !!state.exporting;
   if (state.exporting) {
     exportBtn.textContent = state.exportProgress
-      ? `⏵ ${formatPct(state.exportProgress.pct)}% · ${state.exportProgress.stage}`
-      : '⏵ Exporting…';
+      ? t('export.button_running', {
+          pct: formatPct(state.exportProgress.pct),
+          stage: state.exportProgress.stage,
+        })
+      : t('export.starting');
   } else {
-    exportBtn.textContent = 'Export MP4';
+    exportBtn.textContent = t('toolbar.export_mp4');
   }
   // Re-wire on every render so handlers always match the current DOM.
   wireToolbar();
@@ -400,12 +414,17 @@ function renderToolbar() {
 // reuse / re-render can't strand stale event handlers. (Joey reported
 // template + agent picks not responding in v0.6.2.)
 function wireToolbar() {
+  const langSel = document.getElementById('lang-select');
+  if (langSel) {
+    langSel.value = getLocale();
+    langSel.onchange = (e) => setLocale(e.target.value);
+  }
   const pickBtn = document.getElementById('btn-pick-template');
   if (pickBtn) {
     pickBtn.onclick = (e) => {
       e.preventDefault();
       if (!state.selected) {
-        toast('Pick a project first', 'error');
+        toast(t('composer.placeholder.no_project'), 'error');
         return;
       }
       openGallery();
@@ -448,9 +467,9 @@ function renderMain() {
   body.innerHTML = `
     <aside class="sidebar">
       <div class="sidebar-head">
-        <h2>Projects</h2>
-        <button class="new-project" id="btn-new">+ New</button>
-        <button class="sidebar-toggle" id="btn-sidebar-toggle" title="Collapse sidebar">‹</button>
+        <h2>${t('sidebar.projects')}</h2>
+        <button class="new-project" id="btn-new">${t('sidebar.new')}</button>
+        <button class="sidebar-toggle" id="btn-sidebar-toggle" title="${t('sidebar.collapse')}">‹</button>
       </div>
       <div class="project-list" id="project-list"></div>
     </aside>
@@ -464,10 +483,10 @@ function renderMain() {
               <div class="attachments" id="attachments"></div>
               <textarea id="composer-input" placeholder="..." rows="2"></textarea>
               <div class="actions">
-                <button class="icon-btn" id="btn-attach" title="Attach file">📎</button>
+                <button class="icon-btn" id="btn-attach" title="${t('composer.attach')}">📎</button>
                 <input type="file" id="file-input" multiple style="display:none" />
-                <span class="hint">Cmd / Ctrl + Enter · drag / paste files</span>
-                <button class="send-btn" id="btn-send" disabled>Send</button>
+                <span class="hint">${t('composer.hint')}</span>
+                <button class="send-btn" id="btn-send" disabled>${t('composer.send')}</button>
               </div>
             </div>
           </div>
@@ -475,24 +494,24 @@ function renderMain() {
 
         <section class="right-pane">
           <div class="preview-stage" id="preview-stage">
-            <div class="preview-placeholder"><div><div class="ico">🎞️</div>Pick a template above to preview.</div></div>
+            <div class="preview-placeholder"><div><div class="ico">🎞️</div>${t('preview.placeholder.pick_template')}</div></div>
           </div>
           <div class="frames-strip" id="frames-strip"></div>
           <div class="right-footer">
-            <span class="status" id="footer-status">no project</span>
+            <span class="status" id="footer-status">${t('app.no_project')}</span>
             <span class="grow"></span>
-            <button class="reload-btn" id="btn-reload">↻ Reload preview</button>
+            <button class="reload-btn" id="btn-reload">${t('preview.reload')}</button>
           </div>
         </section>
 
         <section class="text-pane">
           <div class="text-pane-head">
-            <h2>Frame text</h2>
-            <span class="save-state" id="text-save-state">—</span>
-            <button class="textfields-toggle" id="btn-textfields-toggle" title="Collapse panel">›</button>
+            <h2>${t('text_pane.title')}</h2>
+            <span class="save-state" id="text-save-state">${t('text_pane.save_state.idle')}</span>
+            <button class="textfields-toggle" id="btn-textfields-toggle" title="${t('text_pane.collapse')}">›</button>
           </div>
           <div class="text-fields" id="text-fields">
-            <div class="text-empty">Pick a template to see editable text fields here.</div>
+            <div class="text-empty">${t('text_pane.empty_no_frames')}</div>
           </div>
         </section>
         <div class="graph-modal" id="graph-modal">
@@ -508,8 +527,8 @@ function renderMain() {
         </div>
       `
       : `<div class="empty-state"><div><div class="ico">🎬</div>
-          <h2>Pick or create a project</h2>
-          <p>Each project = one HTML video.</p></div></div>`}
+          <h2>${t('app.empty_pick_create')}</h2>
+          <p>${t('app.empty_subtitle')}</p></div></div>`}
   `;
   // Re-attach sidebar handlers (renderMain rebuilt the DOM)
   renderSidebar();
@@ -638,7 +657,8 @@ function renderComposer() {
     const focus = state.iterateFocusFrameId;
     if (focus) {
       const order = (p?.frames ?? []).find((f) => f.graphNodeId === focus)?.order ?? 0;
-      const html = `🎯 仅修改第 ${String(order + 1).padStart(2, '0')} 帧 <span class="fid">${esc(focus)}</span><button title="清除" type="button">✕</button>`;
+      const orderStr = String(order + 1).padStart(2, '0');
+      const html = `🎯 ${t('composer.focus_chip', { order: orderStr, fid: '' })}<span class="fid">${esc(focus)}</span><button title="${t('composer.focus_clear')}" type="button">✕</button>`;
       if (!chip) {
         chip = document.createElement('div');
         chip.className = 'focus-chip';
@@ -657,14 +677,12 @@ function renderComposer() {
     }
   }
 
-  ta.placeholder = !p ? 'Pick a project first…'
-    : !agentsKnown ? 'Describe the video while we check for agents…'
-    : availableAgents.length === 0 ? 'Install Claude Code (claude CLI) to enable chat…'
-    : state.iterateFocusFrameId
-      ? `只修改这一帧的内容（点掉上方芯片可恢复整片）…`
-    : !p.templateId
-      ? 'Describe a video — style, content, mood. Or pick a template above for a quick start.'
-      : 'Describe the video — content, names, data, mood…';
+  ta.placeholder = !p ? t('composer.placeholder.no_project')
+    : !agentsKnown ? t('composer.placeholder.detecting_agents')
+    : availableAgents.length === 0 ? t('composer.placeholder.no_agent')
+    : state.iterateFocusFrameId ? t('composer.placeholder.focus')
+    : !p.templateId ? t('composer.placeholder.no_template')
+    : t('composer.placeholder.with_template');
 }
 
 function renderFooter() {
@@ -684,8 +702,8 @@ function renderChatLog() {
   if (!log) return;
   if (!state.messages.length) {
     log.innerHTML = `<div class="chat-empty"><div><div class="ico">💬</div>
-      Tell the agent what to make. Drop in style references, paste links, attach a logo —
-      whatever helps.<br>The HTML preview on the right updates with each turn.
+      <div style="font-weight:500;margin-bottom:6px;">${t('chat.empty.title')}</div>
+      ${t('chat.empty.body')}
       <div class="examples">
         <b>"Warm-grain magazine outro: Open Design — design that evolves itself"</b>
         <b>"Cyberpunk glitch title saying SYSTEM ONLINE, neon cyan/magenta"</b>
@@ -779,7 +797,7 @@ function renderChatLog() {
         collected[key] = val;
       });
       if (missing) {
-        toast(`请填写 ${missing}`, 'warn');
+        toast(`${t('text_pane.save_state.error')}: ${missing}`, 'warn');
         return;
       }
       m.formSubmitted = collected;
@@ -834,9 +852,9 @@ function renderChatLog() {
       } else if (action === 'copy' && path) {
         try {
           await navigator.clipboard.writeText(path);
-          toast('已复制路径', 'success');
+          toast(t('export.copied'), 'success');
         } catch (e) {
-          toast('复制失败：' + (e?.message ?? e), 'error');
+          toast(t('export.copy_failed', { message: (e?.message ?? e) }), 'error');
         }
       }
     });
@@ -858,28 +876,28 @@ function renderMessage(m, idx) {
     // show a friendlier label instead of a wall of "topic=foo\nheadline=bar…".
     const formMatch = /^\[hv-form:submit\]\n([\s\S]*)$/.exec(m.content ?? '');
     if (formMatch) {
-      return `<div class="msg user">📋 提交了表单</div>`;
+      return `<div class="msg user">${t('chat.summary.form_submitted')}</div>`;
     }
     if ((m.content ?? '').trim() === '[hv-confirm:generate]') {
-      return `<div class="msg user">✓ 确认生成</div>`;
+      return `<div class="msg user">${t('chat.summary.confirm_generate')}</div>`;
     }
     if ((m.content ?? '').trim() === '[hv-confirm:edit]') {
-      return `<div class="msg user">✏️ 改一下</div>`;
+      return `<div class="msg user">${t('chat.summary.confirm_edit')}</div>`;
     }
     return `<div class="msg user">${esc(m.content)}</div>`;
   }
   if (m.role === 'system') return `<div class="msg system">${esc(m.content)}</div>`;
   if (m.role === 'preview-event') return `<div class="msg preview-event">${esc(m.content)}</div>`;
-  if (m.role === 'thinking') return `<div class="msg thinking">${esc(m.content || 'thinking')}</div>`;
+  if (m.role === 'thinking') return `<div class="msg thinking">${esc(m.content || t('chat.thinking'))}</div>`;
   if (m.role === 'export-done') {
     const path = m.content || '';
     const fname = path.split('/').pop() || 'output.mp4';
     return `<div class="msg export-done">
-      <div class="export-title">🎬 MP4 ready</div>
+      <div class="export-title">${t('export.title')}</div>
       <div class="export-path"><code>${esc(path)}</code></div>
       <div class="export-actions">
-        <button class="btn-reveal" data-export-action="reveal">在 Finder 中显示</button>
-        <button class="btn-copy-path" data-export-action="copy">复制路径</button>
+        <button class="btn-reveal" data-export-action="reveal">${t('export.reveal')}</button>
+        <button class="btn-copy-path" data-export-action="copy">${t('export.copy_path')}</button>
       </div>
       <div class="export-fname">${esc(fname)}</div>
     </div>`;
@@ -977,13 +995,15 @@ function renderMessage(m, idx) {
 function sanitizeAssistantProse(text) {
   if (!text) return text;
   let out = text;
+  const genHtml = t('chat.placeholder.gen_html');
+  const planGraph = t('chat.placeholder.plan_graph');
   // ```html ... ``` (full block) — closed
-  out = out.replace(/```html(?:#[\w-]+)?\s*\n[\s\S]*?```/gi, '\n📄 *generating HTML…*\n');
+  out = out.replace(/```html(?:#[\w-]+)?\s*\n[\s\S]*?```/gi, `\n${genHtml}\n`);
   // ```html ... (still open, mid-stream) — clip everything after the fence
-  out = out.replace(/```html(?:#[\w-]+)?\s*\n[\s\S]*$/i, '\n📄 *generating HTML…*');
+  out = out.replace(/```html(?:#[\w-]+)?\s*\n[\s\S]*$/i, `\n${genHtml}`);
   // ```json#content-graph ...```
-  out = out.replace(/```json#content-graph\s*\n[\s\S]*?```/gi, '\n🧭 *planning storyboard…*\n');
-  out = out.replace(/```json#content-graph\s*\n[\s\S]*$/i, '\n🧭 *planning storyboard…*');
+  out = out.replace(/```json#content-graph\s*\n[\s\S]*?```/gi, `\n${planGraph}\n`);
+  out = out.replace(/```json#content-graph\s*\n[\s\S]*$/i, `\n${planGraph}`);
   // ```hv-form / ```hv-confirm / ```hv-options blocks are parsed by their
   // own renderers above; if we got here they slipped past — collapse them.
   out = out.replace(/```hv-(?:form|confirm|options)\s*\n[\s\S]*?```/gi, '');
@@ -1206,16 +1226,13 @@ function renderPreview() {
   if (!stage) return;
   const p = state.selected;
   if (!p) {
-    stage.innerHTML = `<div class="preview-placeholder"><div><div class="ico">🎞️</div>
-      Pick a project first.</div></div>`;
+    stage.innerHTML = `<div class="preview-placeholder"><div><div class="ico">🎞️</div>${t('preview.placeholder.pick_project')}</div></div>`;
     renderFramesStrip();
     return;
   }
   // No template + no prior preview → show "send a chat first" placeholder
   if (!p.templateId && !p.lastPreviewHtmlPath) {
-    stage.innerHTML = `<div class="preview-placeholder"><div><div class="ico">🎞️</div>
-      Send a chat to generate the first HTML.<br>
-      Or pick a template up top for a quick start.</div></div>`;
+    stage.innerHTML = `<div class="preview-placeholder"><div><div class="ico">🎞️</div>${t('preview.placeholder.pick_template')}</div></div>`;
     renderFramesStrip();
     return;
   }
@@ -1242,8 +1259,8 @@ function renderPreview() {
     <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin" src="${iframeSrc}"></iframe>
     ${stamp ? `<div class="stamp">${esc(stamp)}</div>` : ''}
     <button class="edit-toggle" id="btn-edit-text"
-      title="${state.editTextMode ? '完成编辑' : '点击文字直接修改'}">
-      ${state.editTextMode ? '✓ 完成编辑' : '✎ 编辑文字'}
+      title="${state.editTextMode ? t('preview.edit_text_done_title') : t('preview.edit_text_title')}">
+      ${state.editTextMode ? t('preview.edit_text_on') : t('preview.edit_text_off')}
     </button>
   </div>`;
   attachPreviewScaler();
@@ -1276,8 +1293,24 @@ function togglePreviewEdit() {
 // project preview).
 function attachTextEditOverlay(iframe) {
   let doc;
-  try { doc = iframe.contentDocument; } catch { return; }
-  if (!doc) return;
+  try { doc = iframe.contentDocument; } catch (err) {
+    console.warn('[hv-edit] iframe.contentDocument blocked:', err);
+    return;
+  }
+  if (!doc) {
+    console.warn('[hv-edit] iframe.contentDocument is null (still loading? sandbox blocking?)');
+    return;
+  }
+  if (!doc.body) {
+    console.warn('[hv-edit] iframe document has no body yet — re-attaching on next load tick');
+    iframe.addEventListener('load', () => attachTextEditOverlay(iframe), { once: true });
+    return;
+  }
+  const tagged = doc.querySelectorAll('[data-hv-text]');
+  console.log(`[hv-edit] attached overlay; found ${tagged.length} [data-hv-text] elements`);
+  if (tagged.length === 0) {
+    toast(t('preview.no_hv_text'), 'warn');
+  }
   // Idempotent: tear down any prior overlay first.
   doc.querySelectorAll('[data-hv-edit-style]').forEach((el) => el.remove());
   const style = doc.createElement('style');
@@ -1465,8 +1498,8 @@ function renderFramesStrip() {
       </div>
     </button>`;
   }).join('');
-  strip.innerHTML = `<span class="label">Frames</span>${tabs}
-    <button class="frame-graph-btn" id="btn-show-graph">View graph</button>`;
+  strip.innerHTML = `<span class="label">${t('frames.label')}</span>${tabs}
+    <button class="frame-graph-btn" id="btn-show-graph">${t('frames.view_graph')}</button>`;
   // Single-click: switch which frame is shown in the centre preview.
   // Double-click: pin this frame as the iteration target so subsequent
   // chat messages only rewrite this frame. Click another / dbl-click the
@@ -1585,14 +1618,12 @@ function renderTextFields() {
   const wrap = document.getElementById('text-fields');
   if (!wrap) return;
   if (!state.selected) {
-    wrap.innerHTML = '<div class="text-empty">No project.</div>';
+    wrap.innerHTML = `<div class="text-empty">${t('text_pane.no_project')}</div>`;
     return;
   }
   if (state.textFields.length === 0) {
     const hasFrames = (state.selected.frames?.length ?? 0) > 0;
-    const hint = hasFrames
-      ? `当前帧没有可编辑文字。<br>切到别的帧、或在画面里点 ✎ 编辑文字直接改。`
-      : `No editable text yet.<br>Send a chat to generate the first version of the HTML, then per-frame text fields appear here.`;
+    const hint = hasFrames ? t('text_pane.empty_with_frames') : t('text_pane.empty_no_frames');
     wrap.innerHTML = `<div class="text-empty">${hint}</div>`;
     return;
   }
@@ -1738,7 +1769,7 @@ async function sendMessage() {
     ts: Date.now(),
     ...(focusFrame ? { focusFrameId: focusFrame } : {}),
   });
-  state.messages.push({ role: 'thinking', content: 'agent thinking', ts: Date.now() });
+  state.messages.push({ role: 'thinking', content: t('chat.thinking'), ts: Date.now() });
   const thinkingIdx = state.messages.length - 1;
   renderChatLog();
 
@@ -1898,12 +1929,12 @@ function wireModals() {
   document.getElementById('new-ok').onclick = async () => {
     const name = document.getElementById('new-name').value.trim();
     const intent = document.getElementById('new-intent').value.trim();
-    if (!name) { toast('Name is required', 'error'); return; }
+    if (!name) { toast(t('modal.new.name_required'), 'error'); return; }
     const r = await API.createProject({ name, ...(intent && { intent }) });
     closeNewModal();
     await refreshProjects();
     await selectProject(r.project.id);
-    toast(`Created "${name}"`, 'success');
+    toast(t('modal.new.created', { name }), 'success');
   };
   document.getElementById('new-modal').addEventListener('click', e => {
     if (e.target.id === 'new-modal') closeNewModal();
