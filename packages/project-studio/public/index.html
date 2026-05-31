@@ -715,17 +715,21 @@
   /* Use the same fixed-source-size + transform:scale trick as the main
      preview iframe so 1920×1080 templates fit any card width without
      being cropped by absolute-positioned elements at the right edge. */
-  .gallery-card .preview { aspect-ratio: 16/9; background: #000; position: relative;
+  /* Height comes from a padding-top percentage rather than aspect-ratio:
+     inside the column-flex card, aspect-ratio on a flex item collapses to
+     0 height (min-height:auto + no resolved cross size), leaving just the
+     black bar. padding-top:56.25% (= 9/16) reserves a real 16:9 box that
+     the absolutely-positioned iframe fills. */
+  .gallery-card .preview { padding-top: 56.25%; background: #000; position: relative;
     overflow: hidden; }
   .gallery-card .preview iframe { position: absolute; top: 0; left: 0;
     width: 1920px; height: 1080px; border: 0;
     transform: scale(var(--gallery-scale, 0.135));
     transform-origin: top left; pointer-events: none; }
-  /* Portrait templates (vignelli / 9:16) fit at a different aspect. */
+  /* Portrait templates (vignelli / 9:16): 177.78% = 16/9 inverted. */
+  .gallery-card .preview.portrait { padding-top: 177.78%; width: 60%; margin: 0 auto; }
   .gallery-card .preview.portrait iframe { width: 1080px; height: 1920px;
     transform: scale(var(--gallery-scale, 0.24)); }
-  .gallery-card .preview.portrait { aspect-ratio: 9/16; width: 60%;
-    margin: 0 auto; }
 
   /* ===== Template fullscreen preview (the "confirm before applying" modal) ===== */
   .tpl-preview-modal { z-index: 1100; }
