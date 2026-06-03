@@ -1936,6 +1936,9 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       aspect:      pre.aspect      ?? '16:9 横屏',
       duration:    pre.duration    ?? (isMulti ? '15' : '5'),
       frame_count: pre.frame_count ?? (isMulti ? '4' : '1'),
+      // Per-frame pacing default 4s — comfortable, avoids the "rushed" feel a
+      // short total ÷ many frames produces. Total is derived from this × frames.
+      per_frame:   pre.per_frame   ?? '4',
     };
     const p: string[] = [];
     if (isEdit) {
@@ -1946,7 +1949,7 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
     p.push('```hv-form');
     p.push(JSON.stringify({
       meta: { phase: 'format' },
-      title: isEdit ? '改一下格式' : '最后一步：选个尺寸 / 时长 / 帧数',
+      title: isEdit ? '改一下格式' : (isMulti ? '最后一步：尺寸 / 每帧时长 / 帧数' : '最后一步：选个尺寸 / 时长'),
       fields: [
         {
           key: 'aspect', label: '画面尺寸', kind: 'buttons', required: true,
@@ -1958,16 +1961,29 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
             { value: '4:5 小红书',    label: '4:5 小红书' },
           ],
         },
-        {
-          key: 'duration', label: '时长 (秒)', kind: 'buttons', required: true,
-          default: defaults.duration,
-          options: ['3', '5', '10', '15', '30'].map((v) => ({ value: v, label: `${v}s` })),
-        },
-        {
-          key: 'frame_count', label: '帧数', kind: 'buttons', required: true,
-          default: defaults.frame_count,
-          options: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map((v) => ({ value: v, label: v })),
-        },
+        // Multi-frame: pace by PER-FRAME duration (total = per_frame × frames,
+        // shown live). Single-frame: just a total duration.
+        ...(isMulti
+          ? [
+              {
+                key: 'per_frame', label: '每帧时长 (秒)', kind: 'buttons', required: true,
+                default: defaults.per_frame,
+                hint: '总时长 = 每帧时长 × 帧数',
+                options: ['2', '3', '4', '5', '6', '8'].map((v) => ({ value: v, label: `${v}s` })),
+              },
+              {
+                key: 'frame_count', label: '帧数', kind: 'buttons', required: true,
+                default: defaults.frame_count,
+                options: ['2', '3', '4', '5', '6', '7', '8', '9', '10'].map((v) => ({ value: v, label: v })),
+              },
+            ]
+          : [
+              {
+                key: 'duration', label: '时长 (秒)', kind: 'buttons', required: true,
+                default: defaults.duration,
+                options: ['3', '5', '10', '15'].map((v) => ({ value: v, label: `${v}s` })),
+              },
+            ]),
       ],
       allow_attachments: false,
     }, null, 2));
@@ -1991,11 +2007,18 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
     if (pickedStyle) summaryRows.push({ label: '风格', value: pickedStyle });
     if (tmpl) summaryRows.push({ label: '模板', value: tmpl.name });
     const labelMap: Record<string, string> = {
-      aspect: '尺寸', duration: '时长', frame_count: '帧数',
+      aspect: '尺寸', duration: '时长', frame_count: '帧数', per_frame: '每帧时长',
     };
-    for (const k of ['aspect', 'duration', 'frame_count']) {
+    // When pacing by per-frame, show per-frame + frames + derived total.
+    const pf = Number(collected.per_frame ?? '') || 0;
+    const keys = pf > 0 ? ['aspect', 'per_frame', 'frame_count'] : ['aspect', 'duration', 'frame_count'];
+    for (const k of keys) {
       const v = collected[k];
-      if (v) summaryRows.push({ label: labelMap[k] ?? k, value: v });
+      if (v) summaryRows.push({ label: labelMap[k] ?? k, value: k === 'per_frame' ? `${v}s` : v });
+    }
+    if (pf > 0) {
+      const frames = Number(collected.frame_count ?? '4') || 4;
+      summaryRows.push({ label: '总时长', value: `${pf * frames}s` });
     }
     if (attachments.length > 0) {
       summaryRows.push({ label: '素材', value: attachments.map((a) => a.filename).join(', ') });
@@ -2360,8 +2383,16 @@ async function runSplitMultiFrameGenerate(
   const contentTurns = inputs.contentTurns ?? [];
   const aspect = ((collected.aspect ?? '16:9').split(/\s+/)[0] ?? '16:9');
   const frameCountReq = Math.max(2, Math.min(10, Number(collected.frame_count ?? '4') || 4));
-  const totalDurationSec = Number(collected.duration ?? '15') || 15;
-  const perFrameDurationSec = Math.max(2, Math.floor(totalDurationSec / frameCountReq));
+  // Prefer per-frame pacing (total = per_frame × frames) — set by the format
+  // card so a short total ÷ many frames can't produce a rushed clip. Fall back
+  // to total ÷ frames for older projects that only stored `duration`.
+  const perFrameInput = Number(collected.per_frame ?? '') || 0;
+  const perFrameDurationSec = perFrameInput > 0
+    ? Math.max(2, perFrameInput)
+    : Math.max(2, Math.floor((Number(collected.duration ?? '15') || 15) / frameCountReq));
+  const totalDurationSec = perFrameInput > 0
+    ? perFrameDurationSec * frameCountReq
+    : (Number(collected.duration ?? '15') || 15);
   let resolution = '1920×1080';
   if (aspect === '9:16') resolution = '1080×1920';
   else if (aspect === '1:1') resolution = '1080×1080';

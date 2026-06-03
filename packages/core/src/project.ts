@@ -460,6 +460,15 @@ export class ProjectOrchestrator {
     onProgress?.(99, 'mixing audio');
     const { rename } = await import('node:fs/promises');
     const tmpOut = `${outputPath}.muxed.mp4`;
+    // MiniMax music is a fixed ~50s clip regardless of request; `-shortest`
+    // already trims it to the video length, but a hard cut sounds abrupt.
+    // Default a gentle fade-out (≤ a third of the clip, capped 1.5s) when the
+    // user hasn't set one and we know the video length.
+    const defaultFadeOut =
+      musicPath && videoDurationSec && videoDurationSec > 2
+        ? Math.min(1.5, videoDurationSec / 3)
+        : 0;
+    const fadeOutSec = st.fadeOutSec ?? defaultFadeOut;
     await muxAudioWithFfmpeg({
       videoPath: outputPath,
       outputPath: tmpOut,
@@ -468,7 +477,7 @@ export class ProjectOrchestrator {
       ...(st.musicVolumeDb !== undefined && { musicVolumeDb: st.musicVolumeDb }),
       ...(st.narrationVolumeDb !== undefined && { narrationVolumeDb: st.narrationVolumeDb }),
       ...(st.fadeInSec !== undefined && { fadeInSec: st.fadeInSec }),
-      ...(st.fadeOutSec !== undefined && { fadeOutSec: st.fadeOutSec }),
+      ...(fadeOutSec > 0 && { fadeOutSec }),
       ...(videoDurationSec !== undefined && { videoDurationSec }),
     });
     await rename(tmpOut, outputPath);

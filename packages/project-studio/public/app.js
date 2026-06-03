@@ -735,8 +735,10 @@ function wireSoundtrackPanel() {
     const fid = currentFrameId();
     if (fid) state._narrationByFrame[fid] = narrationText.value;
   };
-  // Re-sync whenever the selected frame changes (frames strip click re-renders
-  // main, which re-wires this panel — so reading activeFrameId here is enough).
+  // Expose so the frames-strip click handler can re-point the textarea at the
+  // newly selected frame WITHOUT re-rendering the whole panel (which would lose
+  // unsaved music prompt / scroll position).
+  window.__hvSyncNarration = syncNarrationField;
   syncNarrationField();
 
   async function draftNarration(frameId /* null = all */) {
@@ -1091,6 +1093,18 @@ function renderChatLog() {
   // [hv-form:submit]\n<json>. Files go through the existing pendingAttachments
   // path so the server multipart handler treats them like normal uploads.
   // Segmented buttons: click writes to the hidden input + flips .selected.
+  // Update the live "total = per_frame × frames" readout for a form card.
+  const updateFormTotal = (msgIdx) => {
+    const totalEl = document.getElementById(`form-total-${msgIdx}`);
+    if (!totalEl) return;
+    const card = totalEl.closest('.form-card');
+    const val = (key) => {
+      const h = card?.querySelector(`.form-seg[data-form-key="${CSS.escape(key)}"] input[type="hidden"]`);
+      return Number(h?.value || 0);
+    };
+    const pf = val('per_frame'), fc = val('frame_count');
+    totalEl.textContent = pf > 0 && fc > 0 ? `${t('soundtrack.total_word') || 'Total'} ≈ ${pf * fc}s` : '';
+  };
   log.querySelectorAll('.form-seg-btn[data-form-msg]').forEach((btn) => {
     btn.onclick = (e) => {
       e.preventDefault();
@@ -1101,8 +1115,11 @@ function renderChatLog() {
       btn.classList.add('selected');
       const hidden = seg.querySelector('input[type="hidden"]');
       if (hidden) hidden.value = btn.dataset.val ?? '';
+      updateFormTotal(Number(btn.dataset.formMsg));
     };
   });
+  // Initial paint of any total readouts present.
+  log.querySelectorAll('[id^="form-total-"]').forEach((el) => updateFormTotal(Number(el.id.replace('form-total-', ''))));
   log.querySelectorAll('button.form-submit[data-form-msg]').forEach((btn) => {
     btn.onclick = async () => {
       const msgIdx = Number(btn.dataset.formMsg);
@@ -1471,11 +1488,17 @@ function renderFormCard(form, submitted, msgIdx) {
     } else {
       control = `<input type="text" data-form-msg="${msgIdx}" data-form-key="${esc(key)}" placeholder="${esc(ph)}" value="${esc(def)}" ${dis} />`;
     }
+    const hintHtml = f.hint ? `<span class="form-hint">${esc(f.hint)}</span>` : '';
     return `<div class="form-field">
-      <label>${esc(label)}${required}</label>
+      <label>${esc(label)}${required}${hintHtml}</label>
       ${control}
     </div>`;
   }).join('');
+  // Live total-duration readout when the form paces by per-frame × frames.
+  const hasPerFrame = fields.some((f) => f.key === 'per_frame') && fields.some((f) => f.key === 'frame_count');
+  const totalHtml = hasPerFrame && !submitted
+    ? `<div class="form-total" id="form-total-${msgIdx}"></div>`
+    : '';
   const dropHtml = allowAttachments && !submitted ? `
     <div class="form-attachments" data-form-msg="${msgIdx}">
       <div class="form-drop-hint">📎 拖拽 / 粘贴 / 选择文件作为素材（logo、截图、数据 CSV…可选）</div>
@@ -1490,6 +1513,7 @@ function renderFormCard(form, submitted, msgIdx) {
   return `<div class="form-card${submitted ? ' submitted' : ''}">
     <div class="form-title">${esc(title)}</div>
     <div class="form-fields">${fieldsHtml}</div>
+    ${totalHtml}
     ${dropHtml}
     ${actionsHtml}
   </div>`;
@@ -1852,6 +1876,8 @@ function renderFramesStrip() {
       // Refresh the right-pane Frame text editor to point at the newly
       // active frame's data-hv-text values.
       refreshTextFields();
+      // Soundtrack narration is per-frame — point the textarea at this frame.
+      if (typeof window.__hvSyncNarration === 'function') window.__hvSyncNarration();
     });
   });
   const gbtn = document.getElementById('btn-show-graph');
