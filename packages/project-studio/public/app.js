@@ -786,23 +786,40 @@ function wireSoundtrackPanel() {
     const i = sortedFrames.findIndex((f) => f.graphNodeId === fid);
     return i >= 0 ? `${t('soundtrack.frame_word')} ${i + 1}/${sortedFrames.length}` : '';
   };
-  const currentFrameId = () => state.activeFrameId ?? sortedFrames[0]?.graphNodeId ?? null;
+  // Read frames LIVE from state (not the wire-time snapshot) so button state is
+  // always correct no matter what changed it (generate / regen / switch / clear).
+  const liveFrames = () => [...(state.selected?.frames ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const currentFrameId = () => state.activeFrameId ?? liveFrames()[0]?.graphNodeId ?? null;
   const syncNarrationField = () => {
+    const frames = liveFrames();
+    const has = frames.length > 0;
     const fid = currentFrameId();
-    if (whichEl) whichEl.textContent = hasFrames ? frameLabel(fid) : '';
-    narrationText.value = (fid && state._narrationByFrame[fid]) || '';
-    const dis = !hasFrames || !fid;
+    if (whichEl) {
+      const i = frames.findIndex((f) => f.graphNodeId === fid);
+      whichEl.textContent = has && i >= 0 ? `${t('soundtrack.frame_word')} ${i + 1}/${frames.length}` : '';
+    }
+    // Only overwrite the textarea when it isn't the user's in-progress edit.
+    if (document.activeElement !== narrationText) {
+      narrationText.value = (fid && state._narrationByFrame[fid]) || '';
+    }
+    const dis = !has || !fid;
     if (draftFrameBtn) { draftFrameBtn.disabled = dis; draftFrameBtn.title = dis ? t('soundtrack.draft_need_frames') : ''; }
-    if (draftAllBtn) { draftAllBtn.disabled = !hasFrames; draftAllBtn.title = hasFrames ? '' : t('soundtrack.draft_need_frames'); }
+    if (draftAllBtn) { draftAllBtn.disabled = !has; draftAllBtn.title = has ? '' : t('soundtrack.draft_need_frames'); }
+    const fitBtn = document.getElementById('btn-st-fit');
+    if (fitBtn) {
+      const anyNarr = Object.values(state._narrationByFrame || {}).some((v) => (v || '').trim());
+      fitBtn.disabled = !has || !anyNarr;
+    }
   };
   // Persist edits back to the active frame as the user types.
   narrationText.oninput = () => {
     const fid = currentFrameId();
     if (fid) state._narrationByFrame[fid] = narrationText.value;
   };
-  // Expose so the frames-strip click handler can re-point the textarea at the
-  // newly selected frame WITHOUT re-rendering the whole panel (which would lose
-  // unsaved music prompt / scroll position).
+  // Expose so ANY state change (frame switch, generation finished, regen, etc.)
+  // can re-evaluate button enablement + the shown line without re-rendering the
+  // whole panel. Called from renderPreview() — the convergence point all those
+  // paths already hit — so buttons can never get stuck stale.
   window.__hvSyncNarration = syncNarrationField;
   syncNarrationField();
 
@@ -1732,6 +1749,10 @@ function renderPreview() {
     }
   }
   renderFramesStrip();
+  // Convergence point for every frame/preview change → keep soundtrack buttons
+  // (draft / fit) and the per-frame narration line in sync, regardless of which
+  // path triggered the change.
+  if (typeof window.__hvSyncNarration === 'function') window.__hvSyncNarration();
 }
 
 function togglePreviewEdit() {
@@ -2307,14 +2328,10 @@ async function sendMessage() {
             if (frameCount > 0) state.activeFrameId = null;
             const pr = await API.getProject(state.selected.id);
             state.selected = pr.project;
-            renderPreview();
+            renderPreview(); // also re-syncs soundtrack buttons via __hvSyncNarration
             await refreshTextFields();
             renderToolbar();
             renderFooter();
-            // Frames just changed — re-wire the soundtrack panel so its
-            // narration draft / fit buttons re-evaluate hasFrames (they were
-            // disabled while frames[] was still empty at panel-render time).
-            if (typeof wireSoundtrackPanel === 'function') wireSoundtrackPanel();
           } else if (ev.type === 'warning') {
             if (assistantIdx === -1) {
               state.messages[thinkingIdx] = { role: 'assistant', agent: state.selected.agentId ?? 'claude', content: '', ts: Date.now() };
